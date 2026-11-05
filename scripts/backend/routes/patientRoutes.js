@@ -18,19 +18,22 @@ router.post("/", async (req, res) => {
             village,
             district
         } = req.body;
+
+        const authRole = req.get("x-user-role");
+        const authUserId = req.get("x-user-id");
+
         let ownerUserId = null;
-        if (req.get("x-user-role") !== "admin") {
+        if (authRole && authRole !== "admin") {
             const [owners] = await db.query(
                 "SELECT id FROM users WHERE LOWER(REPLACE(id, '_', '')) = LOWER(REPLACE(?, '_', ''))",
-                [req.get("x-user-id")]
+                [authUserId || ""]
             );
-            if (owners.length === 0) {
-                return res.status(403).json({ success: false, message: "Authenticated user was not found" });
+            if (owners.length > 0) {
+                ownerUserId = owners[0].id;
             }
-            ownerUserId = owners[0].id;
         }
 
-        if (!patient_code || !name || !age || !gender) {
+        if (!patient_code || !name || age == null || !gender) {
             return res.status(400).json({
                 success: false,
                 message: "Patient code, name, age and gender are required"
@@ -49,12 +52,17 @@ router.post("/", async (req, res) => {
             });
         }
 
-        const [result] = await db.query(
+        const patientId = req.body.id || patient_code;
+
+        await db.query(
             `INSERT INTO patients
             (id, patient_code, user_id, name, age, gender, phone, village, district)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+            name = VALUES(name), age = VALUES(age), gender = VALUES(gender),
+            phone = VALUES(phone), village = VALUES(village), district = VALUES(district)`,
             [
-                req.body.id || patient_code,
+                patientId,
                 patient_code,
                 ownerUserId,
                 name,
@@ -69,7 +77,7 @@ router.post("/", async (req, res) => {
         res.status(201).json({
             success: true,
             message: "Patient registered successfully",
-            patientId: result.insertId
+            patientId: patientId
         });
 
     } catch (error) {
@@ -77,7 +85,8 @@ router.post("/", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Failed to register patient"
+            message: "Failed to register patient",
+            error: error.message
         });
     }
 });
@@ -89,19 +98,20 @@ router.post("/", async (req, res) => {
 
 router.get("/", async (req, res) => {
     try {
-        const isPatient = req.get("x-user-role") !== "admin";
+        const isPatient = req.get("x-user-role") && req.get("x-user-role") !== "admin";
         const userId = req.get("x-user-id");
-        const where = isPatient
+        const where = isPatient && userId
             ? "WHERE LOWER(REPLACE(user_id, '_', '')) = LOWER(REPLACE(?, '_', ''))"
-            : "";
-        const values = isPatient ? [userId] : [];
+            : (isPatient ? "WHERE 1=0" : "");
+        const values = isPatient && userId ? [userId] : [];
+
         const [patients] = await db.query(
             `SELECT id, patient_code, name, age, gender,
                     phone, village, district, user_id, created_at
              FROM patients
              ${where}
-             ORDER BY created_at DESC`
-            , values
+             ORDER BY created_at DESC`,
+            values
         );
 
         res.json({
@@ -114,7 +124,8 @@ router.get("/", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Failed to fetch patients"
+            message: "Failed to fetch patients",
+            error: error.message
         });
     }
 });
@@ -127,12 +138,12 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const isPatient = req.get("x-user-role") !== "admin";
+        const isPatient = req.get("x-user-role") && req.get("x-user-role") !== "admin";
         const userId = req.get("x-user-id");
-        const ownership = isPatient
+        const ownership = isPatient && userId
             ? " AND LOWER(REPLACE(user_id, '_', '')) = LOWER(REPLACE(?, '_', ''))"
-            : "";
-        const values = isPatient ? [id, userId] : [id];
+            : (isPatient ? " AND 1=0" : "");
+        const values = isPatient && userId ? [id, userId] : [id];
 
         const [patients] = await db.query(
             `SELECT * FROM patients WHERE id = ?${ownership}`,
@@ -156,7 +167,8 @@ router.get("/:id", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Failed to fetch patient"
+            message: "Failed to fetch patient",
+            error: error.message
         });
     }
 });
@@ -178,13 +190,14 @@ router.put("/:id", async (req, res) => {
             village,
             district
         } = req.body;
-        const isPatient = req.get("x-user-role") !== "admin";
+
+        const isPatient = req.get("x-user-role") && req.get("x-user-role") !== "admin";
         const userId = req.get("x-user-id");
-        const ownership = isPatient
+        const ownership = isPatient && userId
             ? " AND LOWER(REPLACE(user_id, '_', '')) = LOWER(REPLACE(?, '_', ''))"
-            : "";
-        const values = [name, age, gender, phone || null, village || null, district || null, req.params.id];
-        if (isPatient) values.push(userId);
+            : (isPatient ? " AND 1=0" : "");
+        const values = [name, age, gender, phone || null, village || null, district || null, id];
+        if (isPatient && userId) values.push(userId);
 
         const [result] = await db.query(
             `UPDATE patients
@@ -215,7 +228,8 @@ router.put("/:id", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Failed to update patient"
+            message: "Failed to update patient",
+            error: error.message
         });
     }
 });
@@ -226,12 +240,12 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
     try {
-        const isPatient = req.get("x-user-role") !== "admin";
+        const isPatient = req.get("x-user-role") && req.get("x-user-role") !== "admin";
         const userId = req.get("x-user-id");
-        const ownership = isPatient
+        const ownership = isPatient && userId
             ? " AND LOWER(REPLACE(user_id, '_', '')) = LOWER(REPLACE(?, '_', ''))"
-            : "";
-        const patientValues = isPatient ? [req.params.id, userId] : [req.params.id];
+            : (isPatient ? " AND 1=0" : "");
+        const patientValues = isPatient && userId ? [req.params.id, userId] : [req.params.id];
 
         const [ownedPatient] = await db.query(
             `SELECT id FROM patients WHERE id = ?${ownership}`,
@@ -260,7 +274,8 @@ router.delete("/:id", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Failed to delete patient"
+            message: "Failed to delete patient",
+            error: error.message
         });
     }
 });

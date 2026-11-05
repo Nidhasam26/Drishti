@@ -1,7 +1,14 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import mysql from "mysql2/promise";
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load .env from backend directory, workspace root, and parent directory
+dotenv.config({ path: path.resolve(__dirname, ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST || "127.0.0.1",
@@ -19,8 +26,8 @@ try {
     await pool.query("SELECT 1 AS connected");
     console.log("✅ MySQL connected successfully!");
 } catch (error) {
-    await pool.end();
-    throw new Error(`MySQL connection failed: ${error.message}`);
+    console.warn(`⚠️ MySQL initial connection notice: ${error.message}`);
+    console.warn("   Verify MySQL is running and DB_PASSWORD is correct in .env");
 }
 
 export default pool;

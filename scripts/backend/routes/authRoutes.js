@@ -11,44 +11,55 @@ const router = express.Router();
 
 router.post("/register", async (req, res) => {
     try {
-        const { name, email, password, role } = req.body;
+        const { name, email, username, password, pin, role } = req.body;
 
-        if (!name || !email || !password) {
+        const effectiveIdentifier = email || username;
+        const effectiveSecret = password || pin;
+
+        if (!name || !effectiveIdentifier || !effectiveSecret) {
             return res.status(400).json({
                 success: false,
-                message: "Name, email and password are required"
+                message: "Name, email/username and password/PIN are required"
             });
         }
 
+        const effectiveUsername = username
+            ? username.trim().toLowerCase()
+            : (email ? email.split("@")[0].toLowerCase() : `usr_${Date.now()}`);
+
+        const effectiveEmail = email
+            ? email.trim().toLowerCase()
+            : `${effectiveUsername}@drishti.local`;
+
         // Check if user already exists
         const [existingUsers] = await db.query(
-            "SELECT id FROM users WHERE email = ?",
-            [email]
+            "SELECT id FROM users WHERE (email IS NOT NULL AND email = ?) OR (username IS NOT NULL AND username = ?)",
+            [effectiveEmail, effectiveUsername]
         );
 
         if (existingUsers.length > 0) {
             return res.status(409).json({
                 success: false,
-                message: "Email already registered"
+                message: "Email or username already registered"
             });
         }
 
         // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
+        const hashedPassword = await bcrypt.hash(effectiveSecret, 10);
         const userRole = role || "health_worker";
+        const userId = req.body.id || `usr_${Date.now()}`;
 
         // Insert user
-        const [result] = await db.query(
-            `INSERT INTO users (name, email, password, role)
-             VALUES (?, ?, ?, ?)`,
-            [name, email, hashedPassword, userRole]
+        await db.query(
+            `INSERT INTO users (id, name, username, email, password, pin_hash, role)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [userId, name, effectiveUsername, effectiveEmail, hashedPassword, hashedPassword, userRole]
         );
 
         res.status(201).json({
             success: true,
             message: "User registered successfully",
-            userId: result.insertId
+            userId: userId
         });
 
     } catch (error) {
@@ -56,7 +67,8 @@ router.post("/register", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Registration failed"
+            message: "Registration failed",
+            error: error.message
         });
     }
 });
@@ -68,48 +80,45 @@ router.post("/register", async (req, res) => {
 
 router.post("/login", async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, username, password, pin } = req.body;
+        const identifier = (email || username || "").trim();
+        const secret = (password || pin || "").trim();
 
-        if (!email || !password) {
+        if (!identifier || !secret) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required"
+                message: "Email/username and password/PIN are required"
             });
         }
 
-        // Find user
+        // Find user by email, username, or id
         const [users] = await db.query(
-            "SELECT * FROM users WHERE email = ?",
-            [email]
+            "SELECT * FROM users WHERE email = ? OR username = ? OR id = ? OR LOWER(REPLACE(id, '_', '')) = LOWER(REPLACE(?, '_', ''))",
+            [identifier, identifier, identifier, identifier]
         );
 
         if (users.length === 0) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password"
+                message: "Invalid credentials"
             });
         }
 
-        // IMPORTANT:
-        // users exists inside this login function
         const user = users[0];
 
-        // Compare password
-        const passwordMatch = await bcrypt.compare(
-            password,
-            user.password
-        );
-
-        console.log("LOGIN DEBUG");
-console.log("Email found:", user.email);
-console.log("Password hash exists:", !!user.password);
-console.log("Password hash length:", user.password?.length);
-console.log("Password matches:", passwordMatch);
+        // Compare password or PIN hash
+        let passwordMatch = false;
+        if (user.password) {
+            passwordMatch = await bcrypt.compare(secret, user.password);
+        }
+        if (!passwordMatch && user.pin_hash) {
+            passwordMatch = await bcrypt.compare(secret, user.pin_hash);
+        }
 
         if (!passwordMatch) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password"
+                message: "Invalid credentials"
             });
         }
 
@@ -132,6 +141,7 @@ console.log("Password matches:", passwordMatch);
             user: {
                 id: user.id,
                 name: user.name,
+                username: user.username,
                 email: user.email,
                 role: user.role
             }
@@ -142,7 +152,8 @@ console.log("Password matches:", passwordMatch);
 
         res.status(500).json({
             success: false,
-            message: "Login failed"
+            message: "Login failed",
+            error: error.message
         });
     }
 });

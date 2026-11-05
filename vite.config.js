@@ -81,8 +81,6 @@ export default defineConfig({
         manualChunks: {
           "vendor-react": ["react", "react-dom", "react-router-dom"],
           "vendor-charts": ["recharts", "d3"],
-          "vendor-3d": ["three"],
-          "vendor-motion": ["motion"],
           "vendor-icons": ["lucide-react"],
         },
       },

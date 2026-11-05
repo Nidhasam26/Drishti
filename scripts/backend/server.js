@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import db from "./db.js";
 
@@ -7,14 +10,21 @@ import authRoutes from "./routes/authRoutes.js";
 import patientRoutes from "./routes/patientRoutes.js";
 import scanRoutes from "./routes/scanRoutes.js";
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-app.use("/uploads", express.static("uploads"));
+const uploadDir = path.resolve(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadDir));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/patients", patientRoutes);
@@ -40,11 +50,22 @@ app.post("/api/sync/batch", async (req, res) => {
     try {
         if (entityType === "patient") {
             if (operation === "CREATE_PATIENT") {
-                const ownerUserId = payload.userId
+                let ownerUserId = payload.userId
                     ? await resolveUserId(payload.userId)
                     : null;
+                // If user doesn't exist in MySQL, insert user placeholder so fk_patient_user constraint succeeds
                 if (payload.userId && !ownerUserId) {
-                    return res.status(403).json({ success: false, message: "Patient owner was not found" });
+                    try {
+                        await db.query(
+                            `INSERT INTO users (id, name, username, role)
+                             VALUES (?, ?, ?, 'user')
+                             ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+                            [payload.userId, payload.name || "App User", payload.username || payload.userId]
+                        );
+                        ownerUserId = payload.userId;
+                    } catch {
+                        ownerUserId = null;
+                    }
                 }
                 await db.query(
                     `INSERT INTO patients
@@ -65,10 +86,23 @@ app.post("/api/sync/batch", async (req, res) => {
                         payload.village || null, payload.district || null, entityId]
                 );
             } else if (operation === "DELETE_PATIENT") {
+                await db.query("DELETE FROM retinal_scans WHERE patient_id = ?", [entityId]);
                 await db.query("DELETE FROM patients WHERE id = ?", [entityId]);
             }
         } else if (entityType === "scan") {
             if (operation === "CREATE_SCAN") {
+                // Ensure patient exists in patients table so fk_retinal_scans_patient constraint succeeds
+                if (payload.patient_id) {
+                    const [existingPatient] = await db.query("SELECT id FROM patients WHERE id = ?", [payload.patient_id]);
+                    if (existingPatient.length === 0) {
+                        await db.query(
+                            `INSERT INTO patients (id, patient_code, name, user_id)
+                             VALUES (?, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+                            [payload.patient_id, payload.patient_code || payload.patient_id, payload.patient_name || payload.patient_id, null]
+                        );
+                    }
+                }
                 await db.query(
                     `INSERT INTO retinal_scans
                     (id, patient_id, eye, image_path, ai_status, dr_grade, confidence, risk_level)
@@ -100,7 +134,7 @@ app.post("/api/sync/batch", async (req, res) => {
         res.json({ success: true, idempotencyKey });
     } catch (error) {
         console.error("Sync error:", error.message);
-        res.status(500).json({ success: false, message: "Sync failed" });
+        res.status(500).json({ success: false, message: "Sync failed", error: error.message });
     }
 });
 

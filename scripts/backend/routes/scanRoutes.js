@@ -10,7 +10,7 @@ const router = express.Router();
 // UPLOAD DIRECTORY
 // ========================================
 
-const uploadDir = path.join(process.cwd(), "uploads");
+const uploadDir = path.resolve(process.cwd(), "uploads");
 
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -43,7 +43,6 @@ const storage = multer.diskStorage({
 // ========================================
 
 const fileFilter = (req, file, cb) => {
-
     const allowedTypes = [
         "image/jpeg",
         "image/jpg",
@@ -64,7 +63,6 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
     storage,
     fileFilter,
-
     limits: {
         fileSize: 10 * 1024 * 1024
     }
@@ -79,9 +77,7 @@ router.post(
     "/upload",
     upload.single("retinal_image"),
     async (req, res) => {
-
         try {
-
             const {
                 patient_id,
                 eye
@@ -111,7 +107,6 @@ router.post(
                 });
             }
 
-
             // Check patient exists
             const [patients] = await db.query(
                 "SELECT id FROM patients WHERE id = ?",
@@ -119,9 +114,10 @@ router.post(
             );
 
             if (patients.length === 0) {
-
                 // Delete uploaded image
-                fs.unlinkSync(req.file.path);
+                if (fs.existsSync(req.file.path)) {
+                    fs.unlinkSync(req.file.path);
+                }
 
                 return res.status(404).json({
                     success: false,
@@ -129,53 +125,51 @@ router.post(
                 });
             }
 
-
             // Save scan
             const imagePath = `/uploads/${req.file.filename}`;
+            const scanId = req.body.id || `scn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-            const [result] = await db.query(
+            await db.query(
                 `INSERT INTO retinal_scans
                 (
+                    id,
                     patient_id,
                     eye,
                     image_path,
                     ai_status
                 )
-                VALUES (?, ?, ?, 'PENDING')`,
+                VALUES (?, ?, ?, ?, 'PENDING')`,
                 [
+                    scanId,
                     patient_id,
                     eye,
                     imagePath
                 ]
             );
 
-
             res.status(201).json({
-
                 success: true,
-
                 message: "Retinal image uploaded successfully",
-
                 scan: {
-                    id: result.insertId,
+                    id: scanId,
                     patient_id,
                     eye,
                     image_path: imagePath,
                     ai_status: "PENDING"
                 }
-
             });
 
         } catch (error) {
+            console.error("❌ Scan upload error:", error.message);
 
-            console.error(
-                "❌ Scan upload error:",
-                error.message
-            );
+            if (req.file && fs.existsSync(req.file.path)) {
+                try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+            }
 
             res.status(500).json({
                 success: false,
-                message: "Failed to upload retinal image"
+                message: "Failed to upload retinal image",
+                error: error.message
             });
         }
     }
@@ -187,17 +181,15 @@ router.post(
 // ========================================
 
 router.get("/", async (req, res) => {
-
     try {
-        const isPatient = req.get("x-user-role") !== "admin";
+        const isPatient = req.get("x-user-role") && req.get("x-user-role") !== "admin";
         const userId = req.get("x-user-id");
-        const ownership = isPatient
+        const ownership = isPatient && userId
             ? "WHERE LOWER(REPLACE(p.user_id, '_', '')) = LOWER(REPLACE(?, '_', ''))"
-            : "";
-        const values = isPatient ? [userId] : [];
+            : (isPatient ? "WHERE 1=0" : "");
+        const values = isPatient && userId ? [userId] : [];
 
         const [scans] = await db.query(
-
             `SELECT
                 rs.id,
                 rs.patient_id,
@@ -213,17 +205,13 @@ router.get("/", async (req, res) => {
                 rs.ai_status,
                 rs.created_at,
                 p.user_id AS ownerUserId
-
              FROM retinal_scans rs
-
              INNER JOIN patients p
                 ON rs.patient_id = p.id
-
-                 ${ownership}
-             ORDER BY rs.created_at DESC`
-                , values
+             ${ownership}
+             ORDER BY rs.created_at DESC`,
+            values
         );
-
 
         res.json({
             success: true,
@@ -231,15 +219,12 @@ router.get("/", async (req, res) => {
         });
 
     } catch (error) {
-
-        console.error(
-            "❌ Get scans error:",
-            error.message
-        );
+        console.error("❌ Get scans error:", error.message);
 
         res.status(500).json({
             success: false,
-            message: "Failed to fetch scans"
+            message: "Failed to fetch scans",
+            error: error.message
         });
     }
 });
@@ -250,19 +235,16 @@ router.get("/", async (req, res) => {
 // ========================================
 
 router.get("/:id", async (req, res) => {
-
     try {
-
         const { id } = req.params;
-        const isPatient = req.get("x-user-role") !== "admin";
+        const isPatient = req.get("x-user-role") && req.get("x-user-role") !== "admin";
         const userId = req.get("x-user-id");
-        const ownership = isPatient
+        const ownership = isPatient && userId
             ? " AND LOWER(REPLACE(p.user_id, '_', '')) = LOWER(REPLACE(?, '_', ''))"
-            : "";
-        const values = isPatient ? [id, userId] : [id];
+            : (isPatient ? " AND 1=0" : "");
+        const values = isPatient && userId ? [id, userId] : [id];
 
         const [scans] = await db.query(
-
             `SELECT
                 rs.*,
                 p.patient_code,
@@ -270,28 +252,21 @@ router.get("/:id", async (req, res) => {
                 p.age,
                 p.gender,
                 p.village,
-                 p.district,
-                 p.user_id AS ownerUserId
-
+                p.district,
+                p.user_id AS ownerUserId
              FROM retinal_scans rs
-
              INNER JOIN patients p
                 ON rs.patient_id = p.id
-
              WHERE rs.id = ?${ownership}`,
-
             values
         );
 
-
         if (scans.length === 0) {
-
             return res.status(404).json({
                 success: false,
                 message: "Scan not found"
             });
         }
-
 
         res.json({
             success: true,
@@ -299,18 +274,14 @@ router.get("/:id", async (req, res) => {
         });
 
     } catch (error) {
-
-        console.error(
-            "❌ Get scan error:",
-            error.message
-        );
+        console.error("❌ Get scan error:", error.message);
 
         res.status(500).json({
             success: false,
-            message: "Failed to fetch scan"
+            message: "Failed to fetch scan",
+            error: error.message
         });
     }
 });
-
 
 export default router;

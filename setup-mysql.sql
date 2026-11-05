@@ -16,18 +16,26 @@ FLUSH PRIVILEGES;
 USE drishti_ai;
 
 CREATE TABLE IF NOT EXISTS users (
-	id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+	id VARCHAR(50) NOT NULL,
 	name VARCHAR(150) NOT NULL,
-	email VARCHAR(255) NOT NULL UNIQUE,
-	password VARCHAR(255) NOT NULL,
+	username VARCHAR(100) NOT NULL UNIQUE,
+	email VARCHAR(255) NULL UNIQUE,
+	password VARCHAR(255) NULL,
+	pin_hash VARCHAR(255) NULL,
 	role VARCHAR(50) NOT NULL DEFAULT 'health_worker',
+	phone VARCHAR(20) NULL,
+	village VARCHAR(150) NULL,
+	district VARCHAR(150) NULL,
+	state VARCHAR(150) NULL,
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS patients (
 	id VARCHAR(100) NOT NULL,
 	patient_code VARCHAR(100) NOT NULL UNIQUE,
+	user_id VARCHAR(50) NULL,
 	name VARCHAR(150) NOT NULL,
 	age INT NULL,
 	gender VARCHAR(30) NULL,
@@ -59,7 +67,11 @@ CREATE TABLE IF NOT EXISTS retinal_scans (
 	INDEX idx_retinal_scans_created_at (created_at)
 );
 
--- Compatibility migration for databases created by the earlier app schema.
+-- ===================================================================
+-- Compatibility migrations for databases created by earlier app schemas
+-- ===================================================================
+
+-- 1. Ensure patient_code exists in patients table
 SET @patient_code_exists = (
 	SELECT COUNT(*)
 	FROM information_schema.columns
@@ -76,6 +88,76 @@ PREPARE add_patient_code_statement FROM @add_patient_code;
 EXECUTE add_patient_code_statement;
 DEALLOCATE PREPARE add_patient_code_statement;
 UPDATE patients SET patient_code = id WHERE patient_code IS NULL OR patient_code = '';
+
+-- 2. Ensure gender is VARCHAR(30) in patients table
+SET @gender_is_enum = (
+	SELECT COUNT(*)
+	FROM information_schema.columns
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'patients'
+	  AND column_name = 'gender'
+	  AND data_type = 'enum'
+);
+SET @alter_gender = IF(
+	@gender_is_enum > 0,
+	'ALTER TABLE patients MODIFY COLUMN gender VARCHAR(30) NULL',
+	'SELECT 1'
+);
+PREPARE alter_gender_stmt FROM @alter_gender;
+EXECUTE alter_gender_stmt;
+DEALLOCATE PREPARE alter_gender_stmt;
+
+-- 3. Ensure email exists on users table
+SET @email_exists = (
+	SELECT COUNT(*)
+	FROM information_schema.columns
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'users'
+	  AND column_name = 'email'
+);
+SET @add_email = IF(
+	@email_exists = 0,
+	'ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL UNIQUE AFTER name',
+	'SELECT 1'
+);
+PREPARE add_email_stmt FROM @add_email;
+EXECUTE add_email_stmt;
+DEALLOCATE PREPARE add_email_stmt;
+
+-- 4. Ensure password exists on users table
+SET @password_exists = (
+	SELECT COUNT(*)
+	FROM information_schema.columns
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'users'
+	  AND column_name = 'password'
+);
+SET @add_password = IF(
+	@password_exists = 0,
+	'ALTER TABLE users ADD COLUMN password VARCHAR(255) NULL AFTER email',
+	'SELECT 1'
+);
+PREPARE add_password_stmt FROM @add_password;
+EXECUTE add_password_stmt;
+DEALLOCATE PREPARE add_password_stmt;
+
+-- 5. Ensure role is VARCHAR(50) in users table
+SET @role_is_enum = (
+	SELECT COUNT(*)
+	FROM information_schema.columns
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'users'
+	  AND column_name = 'role'
+	  AND data_type = 'enum'
+);
+SET @alter_role = IF(
+	@role_is_enum > 0,
+	'ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT \'health_worker\'',
+	'SELECT 1'
+);
+PREPARE alter_role_stmt FROM @alter_role;
+EXECUTE alter_role_stmt;
+DEALLOCATE PREPARE alter_role_stmt;
 
 -- Verify
 SELECT USER(), DATABASE();
