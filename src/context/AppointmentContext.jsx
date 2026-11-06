@@ -5,17 +5,122 @@ import { syncEngine } from '../services/syncEngine.js';
 import { useAuth } from './AuthContext.jsx';
 
 const AppointmentContext = createContext(null);
+const DOCTORS_STORAGE_KEY = 'drishti_doctors';
+
+function getInitialDoctors() {
+  try {
+    const saved = localStorage.getItem(DOCTORS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const missingDemo = DEMO_DOCTORS.filter(
+          (d) => !parsed.some((p) => p.id === d.id || p.name.toLowerCase() === d.name.toLowerCase())
+        );
+        return [...parsed, ...missingDemo];
+      }
+    }
+  } catch {}
+  return [...DEMO_DOCTORS];
+}
 
 export function AppointmentProvider({ children }) {
   const { user } = useAuth();
   const [appointments, setAppointments] = useState([]);
-  const [doctors] = useState(DEMO_DOCTORS);
+  const [doctors, setDoctors] = useState(getInitialDoctors);
   const [loading, setLoading] = useState(true);
 
   /**
+   * Load doctors from localStorage and sync from MySQL /api/doctors if online
+   */
+  const loadDoctors = useCallback(async () => {
+    let current = getInitialDoctors();
+    setDoctors(current);
+
+    if (navigator.onLine) {
+      try {
+        const res = await fetch('/api/doctors', { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          const remote = json.data || [];
+          if (remote.length > 0) {
+            const mergedMap = new Map();
+            current.forEach((d) => mergedMap.set(d.id, d));
+            remote.forEach((d) => {
+              const prev = mergedMap.get(d.id) || {};
+              mergedMap.set(d.id, { ...prev, ...d });
+            });
+            const merged = Array.from(mergedMap.values());
+            setDoctors(merged);
+            try {
+              localStorage.setItem(DOCTORS_STORAGE_KEY, JSON.stringify(merged));
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('Backend doctors fetch unavailable; using local doctors:', err.message);
+      }
+    }
+  }, []);
+
+  /**
+   * Register a new doctor profile
+   */
+  const addDoctor = useCallback(async (data) => {
+    const id = data.id || generateClientId('doc');
+    const newDoctor = {
+      id,
+      name: data.name.trim(),
+      title: data.title?.trim() || 'MD, Ophthalmology',
+      role: data.role?.trim() || 'Retina Specialist',
+      specialty: data.specialty?.trim() || 'Diabetic Retinopathy',
+      hospital: data.hospital?.trim() || 'District Eye Hospital',
+      location: data.location?.trim() || 'Yavatmal, Maharashtra',
+      fee: Number(data.fee) || 500,
+      experience: data.experience?.trim() || '5+ years',
+      rating: data.rating ? Number(data.rating) : 4.9,
+      reviewsCount: data.reviewsCount || 1,
+      avatarColor: data.avatarColor || '#0891b2',
+      availableDays: Array.isArray(data.availableDays) && data.availableDays.length > 0
+        ? data.availableDays
+        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+      availableSlots: Array.isArray(data.availableSlots) && data.availableSlots.length > 0
+        ? data.availableSlots
+        : ['09:30 AM', '11:00 AM', '02:00 PM', '04:30 PM'],
+      modes: Array.isArray(data.modes) && data.modes.length > 0
+        ? data.modes
+        : ['in-person', 'tele-consultation'],
+      languages: Array.isArray(data.languages) && data.languages.length > 0
+        ? data.languages
+        : ['Hindi', 'English', 'Marathi'],
+      about: data.about?.trim() || 'Specialist in diabetic retinopathy screening and clinical management.',
+    };
+
+    setDoctors((prev) => {
+      const exists = prev.some((d) => d.id === newDoctor.id || d.name.toLowerCase() === newDoctor.name.toLowerCase());
+      const next = exists ? prev.map((d) => (d.id === newDoctor.id ? newDoctor : d)) : [newDoctor, ...prev];
+      try {
+        localStorage.setItem(DOCTORS_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    if (navigator.onLine) {
+      try {
+        await fetch('/api/doctors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newDoctor),
+        });
+      } catch (err) {
+        console.warn('Backend doctor registration unavailable; stored locally:', err.message);
+      }
+    }
+
+    return { success: true, doctor: newDoctor };
+  }, []);
+
+  /**
    * Load appointments from IndexedDB filtered by ownership.
-   * - admin: sees all appointments in the system
-   * - patient/user: sees only appointments where ownerUserId === user.id
    */
   const loadAppointments = useCallback(async () => {
     if (!user) {
@@ -46,11 +151,11 @@ export function AppointmentProvider({ children }) {
   useEffect(() => {
     setAppointments([]);
     loadAppointments();
-  }, [loadAppointments]);
+    loadDoctors();
+  }, [loadAppointments, loadDoctors]);
 
   /**
    * Check if a specific time slot is available for a doctor on a given date.
-   * Excludes cancelled appointments.
    */
   const isSlotAvailable = useCallback(
     (doctorId, date, time, excludeId = null) => {
@@ -65,7 +170,6 @@ export function AppointmentProvider({ children }) {
 
   /**
    * Add a new appointment record.
-   * SECURITY: ownerUserId is ALWAYS set from the authenticated session.
    */
   const addAppointment = async (data) => {
     if (!user) throw new Error('Must be authenticated to book an appointment.');
@@ -73,25 +177,20 @@ export function AppointmentProvider({ children }) {
     const id = data.id || generateClientId('apt');
     const newAppointment = {
       id,
-      // ── ownership ──
       ownerUserId: user.id,
-      // ── patient info ──
       patientId: data.patientId,
       patientName: data.patientName,
       patientPhone: data.patientPhone || '',
       patientVillage: data.patientVillage || '',
       patientDistrict: data.patientDistrict || '',
-      // ── doctor info ──
       doctorId: data.doctorId,
       doctorName: data.doctorName,
       doctorRole: data.doctorRole || 'Ophthalmologist',
       doctorHospital: data.doctorHospital || 'Regional Eye Center',
       doctorFee: data.doctorFee ?? null,
-      // ── scan linkage ──
       scanId: data.scanId || null,
       scanGrade: data.scanGrade ?? null,
       scanGradeLabel: data.scanGradeLabel || null,
-      // ── schedule ──
       date: data.date,
       time: data.time,
       type: data.type || 'in-person',
@@ -106,7 +205,6 @@ export function AppointmentProvider({ children }) {
     await db.put('appointments', newAppointment);
     setAppointments((prev) => [newAppointment, ...prev]);
 
-    // Enqueue operation into sync queue
     await syncEngine.enqueueOperation({
       operationType: 'CREATE_APPOINTMENT',
       entityType: 'appointment',
@@ -210,6 +308,7 @@ export function AppointmentProvider({ children }) {
         addAppointment,
         updateAppointment,
         cancelAppointment,
+        addDoctor,
         isSlotAvailable,
         getAppointmentById,
         getAppointmentsForCurrentUser,
@@ -218,6 +317,7 @@ export function AppointmentProvider({ children }) {
         getAppointmentForScan,
         getDoctorById,
         reload: loadAppointments,
+        reloadDoctors: loadDoctors,
       }}
     >
       {children}

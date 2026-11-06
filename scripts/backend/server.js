@@ -9,6 +9,7 @@ import db from "./db.js";
 import authRoutes from "./routes/authRoutes.js";
 import patientRoutes from "./routes/patientRoutes.js";
 import scanRoutes from "./routes/scanRoutes.js";
+import doctorRoutes from "./routes/doctorRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, ".env") });
@@ -29,6 +30,7 @@ app.use("/uploads", express.static(uploadDir));
 app.use("/api/auth", authRoutes);
 app.use("/api/patients", patientRoutes);
 app.use("/api/scans", scanRoutes);
+app.use("/api/doctors", doctorRoutes);
 
 async function resolveUserId(userId) {
     if (!userId) return null;

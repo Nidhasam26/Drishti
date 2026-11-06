@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useAppointments } from "../context/AppointmentContext.jsx";
 import { useVoice } from "../hooks/useVoice.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import {
@@ -253,6 +254,7 @@ function AnimatedEye() {
 
 export default function Login() {
   const { login, register } = useAuth();
+  const { addDoctor } = useAppointments();
   const { enabled, language, languages, hasSpeech, voiceCount, enableAndSpeak } = useVoice();
   const { setLanguage: setAppLanguage } = useLanguage();
   const navigate = useNavigate();
@@ -347,6 +349,8 @@ export default function Login() {
 
     setLoading(true);
 
+    const assignedRole = portal === "admin" ? "doctor" : "user";
+
     const result = await register({
       name: regName,
       username: regUsername,
@@ -354,13 +358,27 @@ export default function Login() {
       phone: regPhone,
       village: regVillage,
       district: regDistrict || "Yavatmal",
+      role: assignedRole,
+      portal,
     });
 
-    setLoading(false);
-
     if (result && result.success) {
+      if (portal === "admin") {
+        try {
+          await addDoctor({
+            name: regName.startsWith("Dr.") ? regName : `Dr. ${regName}`,
+            role: "Ophthalmologist & Retina Specialist",
+            specialty: "Diabetic Retinopathy Screening",
+            hospital: "District Eye Hospital",
+            location: `${regVillage || "District Clinic"}, ${regDistrict || "Yavatmal"}`,
+            fee: 500,
+            experience: "5+ years",
+          });
+        } catch {}
+      }
       navigate("/dashboard");
     } else {
+      setLoading(false);
       setError(result?.error || "Registration failed.");
     }
   };
@@ -922,6 +940,27 @@ export default function Login() {
 
         {authMode === "signup" && (
           <form onSubmit={handleSignUp} noValidate>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "9px 12px",
+                borderRadius: 11,
+                background: portal === "admin" ? "rgba(34, 211, 238, 0.12)" : "rgba(16, 185, 129, 0.12)",
+                border: portal === "admin" ? "1px solid rgba(34, 211, 238, 0.25)" : "1px solid rgba(16, 185, 129, 0.25)",
+                fontSize: 12,
+                fontWeight: 700,
+                color: portal === "admin" ? "#22d3ee" : "#34d399",
+                marginBottom: 14,
+                fontFamily: "var(--font-heading)",
+              }}
+            >
+              <ShieldCheck size={16} />
+              {portal === "admin"
+                ? "Registering as Doctor / Specialist"
+                : "Registering as Patient / Health Screener"}
+            </div>
             <div style={{ marginBottom: 13 }}>
               <label htmlFor="reg-fullname" style={labelStyle}>
                 FULL NAME
@@ -1100,7 +1139,11 @@ export default function Login() {
             >
               <UserPlus size={17} />
 
-              {loading ? "Creating..." : "Register & Enter"}
+              {loading
+                ? "Registering..."
+                : portal === "admin"
+                ? "Register as Doctor / Admin"
+                : "Register & Enter"}
             </button>
 
             <button

@@ -67,6 +67,56 @@ CREATE TABLE IF NOT EXISTS retinal_scans (
 	INDEX idx_retinal_scans_created_at (created_at)
 );
 
+CREATE TABLE IF NOT EXISTS doctors (
+	id VARCHAR(50) NOT NULL,
+	name VARCHAR(150) NOT NULL,
+	title VARCHAR(200) NULL,
+	role VARCHAR(200) NULL,
+	specialty VARCHAR(200) NULL,
+	hospital VARCHAR(250) NULL,
+	location VARCHAR(250) NULL,
+	fee DECIMAL(10,2) NULL DEFAULT 500.00,
+	experience VARCHAR(100) NULL,
+	rating DECIMAL(3,2) NULL DEFAULT 4.90,
+	reviews_count INT NULL DEFAULT 0,
+	avatar_color VARCHAR(20) NULL DEFAULT '#0891b2',
+	about TEXT NULL,
+	created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS doctor_available_days (
+	id INT NOT NULL AUTO_INCREMENT,
+	doctor_id VARCHAR(50) NOT NULL,
+	day_of_week ENUM('Mon','Tue','Wed','Thu','Fri','Sat','Sun') NOT NULL,
+	PRIMARY KEY (id),
+	INDEX idx_doctor_days (doctor_id)
+);
+
+CREATE TABLE IF NOT EXISTS doctor_available_slots (
+	id INT NOT NULL AUTO_INCREMENT,
+	doctor_id VARCHAR(50) NOT NULL,
+	slot_time VARCHAR(30) NOT NULL,
+	PRIMARY KEY (id),
+	INDEX idx_doctor_slots (doctor_id)
+);
+
+CREATE TABLE IF NOT EXISTS doctor_languages (
+	id INT NOT NULL AUTO_INCREMENT,
+	doctor_id VARCHAR(50) NOT NULL,
+	language_name VARCHAR(50) NOT NULL,
+	PRIMARY KEY (id),
+	INDEX idx_doctor_languages (doctor_id)
+);
+
+CREATE TABLE IF NOT EXISTS doctor_modes (
+	id INT NOT NULL AUTO_INCREMENT,
+	doctor_id VARCHAR(50) NOT NULL,
+	mode ENUM('in-person','tele-consultation') NOT NULL,
+	PRIMARY KEY (id),
+	INDEX idx_doctor_modes (doctor_id)
+);
+
 -- ===================================================================
 -- Compatibility migrations for databases created by earlier app schemas
 -- ===================================================================

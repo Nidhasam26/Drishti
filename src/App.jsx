@@ -114,7 +114,7 @@ function AppContent() {
         <Route
           path="/scan/new"
           element={
-            <ProtectedRoute allowedRoles={["patient", "user", "admin"]}>
+            <ProtectedRoute allowedRoles={["patient", "user", "admin", "doctor"]}>
               <NewScan />
             </ProtectedRoute>
           }
@@ -133,7 +133,7 @@ function AppContent() {
         <Route
           path="/appointments"
           element={
-            <ProtectedRoute allowedRoles={["patient", "user", "admin"]}>
+            <ProtectedRoute allowedRoles={["patient", "user", "admin", "doctor"]}>
               <AppointmentsList />
             </ProtectedRoute>
           }
@@ -142,7 +142,7 @@ function AppContent() {
         <Route
           path="/appointments/book"
           element={
-            <ProtectedRoute allowedRoles={["patient", "user", "admin"]}>
+            <ProtectedRoute allowedRoles={["patient", "user", "admin", "doctor"]}>
               <BookAppointment />
             </ProtectedRoute>
           }
@@ -151,7 +151,7 @@ function AppContent() {
         <Route
           path="/appointments/:id"
           element={
-            <ProtectedRoute allowedRoles={["patient", "user", "admin"]}>
+            <ProtectedRoute allowedRoles={["patient", "user", "admin", "doctor"]}>
               <AppointmentDetail />
             </ProtectedRoute>
           }
@@ -161,7 +161,7 @@ function AppContent() {
         <Route
           path="/patients"
           element={
-            <ProtectedRoute allowedRoles={["patient", "user", "admin"]}>
+            <ProtectedRoute allowedRoles={["patient", "user", "admin", "doctor"]}>
               <PatientList />
             </ProtectedRoute>
           }
@@ -180,7 +180,7 @@ function AppContent() {
         <Route
           path="/analytics"
           element={
-            <ProtectedRoute allowedRoles={["admin", "user"]}>
+            <ProtectedRoute allowedRoles={["admin", "user", "doctor"]}>
               <DistrictAnalytics />
             </ProtectedRoute>
           }
@@ -190,7 +190,7 @@ function AppContent() {
         <Route
           path="/dataset"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "doctor"]}>
               <DatasetExplorer />
             </ProtectedRoute>
           }
@@ -200,7 +200,7 @@ function AppContent() {
         <Route
           path="/validation"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "doctor"]}>
               <ClinicalValidation />
             </ProtectedRoute>
           }
@@ -210,7 +210,7 @@ function AppContent() {
         <Route
           path="/settings"
           element={
-            <ProtectedRoute allowedRoles={["patient", "user", "admin"]}>
+            <ProtectedRoute allowedRoles={["patient", "user", "admin", "doctor"]}>
               <Settings />
             </ProtectedRoute>
           }
@@ -220,7 +220,7 @@ function AppContent() {
         <Route
           path="/admin"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "doctor"]}>
               <AdminPanel />
             </ProtectedRoute>
           }

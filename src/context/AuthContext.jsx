@@ -116,12 +116,13 @@ export function AuthProvider({ children }) {
     );
     if (!user) return { success: false, error: 'Invalid username or PIN.' };
 
-    // Portal access check
-    if (portal === 'admin' && user.role !== 'admin') {
-      return { success: false, error: 'This account does not have administrator access.' };
+    // Portal access check: allow admin and doctor roles in admin portal
+    const isAdminOrDoctor = user.role === 'admin' || user.role === 'doctor';
+    if (portal === 'admin' && !isAdminOrDoctor) {
+      return { success: false, error: 'This account does not have doctor or administrator access.' };
     }
-    if (portal === 'user' && user.role === 'admin') {
-      return { success: false, error: 'Admin accounts must use the Admin Portal to sign in.' };
+    if (portal === 'user' && isAdminOrDoctor) {
+      return { success: false, error: 'Doctor/Admin accounts must use the Doctor / Admin Portal to sign in.' };
     }
 
     const safeUser = {
@@ -148,11 +149,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   /**
-   * Register a new patient/user account.
+   * Register a new user/doctor/admin account.
    * Returns { success, error? } synchronously.
    */
   const register = useCallback((data) => {
-    const { name, username, pin, phone, village, district } = data;
+    const { name, username, pin, phone, village, district, role } = data;
     if (!name || !username || !pin) {
       return { success: false, error: 'Name, username, and PIN are required.' };
     }
@@ -166,12 +167,14 @@ export function AuthProvider({ children }) {
       return { success: false, error: 'Username already taken. Please choose another.' };
     }
 
+    const assignedRole = role || (data.portal === 'admin' ? 'admin' : 'user');
+
     const newUser = {
       id: `usr_${Date.now()}`,
       name: name.trim(),
       username: username.trim().toLowerCase(),
       pin: pin.trim(),
-      role: 'user',
+      role: assignedRole,
       phone: phone?.trim() || '',
       village: village?.trim() || '',
       district: district?.trim() || 'Yavatmal',
@@ -193,6 +196,21 @@ export function AuthProvider({ children }) {
     };
 
     localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
+
+    // Sync to backend auth if online
+    if (navigator.onLine) {
+      fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newUser.id,
+          name: newUser.name,
+          username: newUser.username,
+          pin: newUser.pin,
+          role: newUser.role,
+        }),
+      }).catch(() => {});
+    }
 
     getDB().then((db) => {
       db.put('auth_cache', { ...safeUser, userId: safeUser.id, cachedAt: new Date().toISOString() }).catch(() => {});
